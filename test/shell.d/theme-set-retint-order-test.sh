@@ -107,8 +107,12 @@ else
   echo "ready"
 fi
 STUB
+# With TEST_INTRO_SECONDS, an intro plays for that long.
 cat >"$commands/owe" <<'STUB'
 #!/bin/bash
+if [[ $1 == "intro" && -n ${TEST_INTRO_SECONDS:-} ]]; then
+  sleep "$TEST_INTRO_SECONDS"
+fi
 [[ $1 != "render" ]]
 STUB
 # With TEST_NO_EXCHANGE, mv stands in for one without --exchange.
@@ -229,6 +233,24 @@ grep -qx 'omarchy-restart-hyprctl' "$log" || fail "a swap no reload followed rel
 touch "$test_tmp/release"
 wait_for_detached_work
 pass "a swap the config watch missed still reloads Hyprland"
+
+# An intro defers the explicit reload until after playback, long after the
+# reload Hyprland made by itself at the swap, which still counts.
+if mv --exchange -T "$test_tmp/exchange-a" "$test_tmp/exchange-b" 2>/dev/null; then
+  rm -f "$test_tmp/release"
+  touch "$test_tmp/release" "$test_tmp/intro-done"
+  OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme alpha
+  wait_for_detached_work
+  touch "$test_tmp/hyprland-autoreloads" "$state/theme/outgoing-theme"
+  TEST_INTRO_SECONDS=0.8 TEST_AUTORELOAD_OFF=false set_theme beta
+  wait_for_detached_work
+  rm -f "$test_tmp/hyprland-autoreloads"
+  grep -q '^omarchy-theme-set-gnome$' "$log" || fail "the intro switch finishes its retints"
+  ! grep -qx 'omarchy-restart-hyprctl' "$log" || fail "an intro does not repeat the reload Hyprland made at the swap"
+  pass "an intro does not repeat the reload Hyprland made at the swap"
+else
+  skip "an intro does not repeat the reload Hyprland made at the swap: mv --exchange is unavailable"
+fi
 
 # Without an exchanging rename the swap leaves a gap, and a reload that lands
 # in it may have loaded no theme, so it does not count.

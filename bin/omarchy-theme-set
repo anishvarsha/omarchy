@@ -102,15 +102,16 @@ hyprland_reloaded_since_swap() {
   [[ -n $HYPRLAND_RELOADS && -n $THEME_SWAPPED_AT ]] || return 1
   [[ $(hyprctl -j getoption misc:disable_autoreload 2>/dev/null | jq -r '.bool' 2>/dev/null) == "false" ]] || return 1
 
-  # Hyprland reloads within a few tens of milliseconds of the swap.
+  # Hyprland reloads within a few tens of milliseconds of the swap. After an
+  # intro this runs long past that, and only reads what was recorded.
   deadline=$((THEME_SWAPPED_AT + 500000))
-  while (( ${EPOCHREALTIME/./} < deadline )); do
+  while true; do
     while read -r reload; do
       (( reload > THEME_SWAPPED_AT )) && return 0
     done <"$HYPRLAND_RELOADS"
+    (( ${EPOCHREALTIME/./} < deadline )) || return 1
     sleep 0.01
   done
-  return 1
 }
 
 reload_hyprland_unless_watched() {
