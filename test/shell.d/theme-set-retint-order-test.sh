@@ -111,7 +111,16 @@ cat >"$commands/owe" <<'STUB'
 #!/bin/bash
 [[ $1 != "render" ]]
 STUB
-chmod +x "$commands/omarchy-notification-send" "$commands/hyprctl" "$commands/omarchy-shell" "$commands/owe"
+# With TEST_NO_EXCHANGE, mv stands in for one without --exchange.
+real_mv=$(command -v mv)
+cat >"$commands/mv" <<STUB
+#!/bin/bash
+if [[ \$1 == "--exchange" && -n \${TEST_NO_EXCHANGE:-} ]]; then
+  exit 1
+fi
+exec "$real_mv" "\$@"
+STUB
+chmod +x "$commands/omarchy-notification-send" "$commands/hyprctl" "$commands/omarchy-shell" "$commands/owe" "$commands/mv"
 
 set_theme() {
   : >"$log"
@@ -189,6 +198,15 @@ grep -qx 'omarchy-restart-hyprctl' "$log" || fail "a switch from a theme without
 touch "$test_tmp/release"
 wait_for_detached_work
 pass "a switch from a theme Hyprland had no file of to watch still reloads it"
+
+# Without an exchanging rename the swap leaves a gap the watch can fall into.
+rm -f "$test_tmp/release"
+TEST_NO_EXCHANGE=1 TEST_AUTORELOAD_OFF=false OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme beta
+grep -qx 'omarchy-restart-hyprctl' "$log" || fail "a swap that could not be one rename reloads Hyprland"
+[[ $(<"$state/theme.name") == "beta" && -f $state/theme/hyprland.lua ]] || fail "the fallback swap still applies the theme"
+touch "$test_tmp/release"
+wait_for_detached_work
+pass "a swap that could not be one rename still reloads Hyprland"
 
 rm -f "$test_tmp/release"
 (sleep 0.3; touch "$test_tmp/release") &

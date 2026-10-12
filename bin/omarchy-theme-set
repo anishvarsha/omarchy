@@ -73,11 +73,12 @@ report_failed_theme_commands() {
 # Hyprland watches the config files it loaded, the theme's hyprland.lua among
 # them, and reloads itself when the swap replaces that. Reloading again repeats
 # the work, a compositor stall of ~20ms in the middle of the transition, so
-# reload here only when there was nothing to watch, because the outgoing theme
-# had no hyprland.lua, or when the watch is off: turned off by the user, or
-# paused by omarchy-hyprland-reload-guard around a package transaction.
+# reload here only when the watch may have missed the swap (the outgoing theme
+# had no hyprland.lua, or the swap could not be one rename), or when the watch
+# is off: turned off by the user, or paused by omarchy-hyprland-reload-guard
+# around a package transaction.
 reload_hyprland_unless_watched() {
-  if [[ $PREVIOUS_THEME_HYPRLAND == "true" &&
+  if [[ $HYPRLAND_WATCH_SEES_SWAP == "true" &&
     $(hyprctl -j getoption misc:disable_autoreload 2>/dev/null | jq -r '.bool' 2>/dev/null) == "false" ]]; then
     return 0
   fi
@@ -505,11 +506,9 @@ fi
 # leaves no moment without a current theme: Hyprland's config watch reloads
 # when the old hyprland.lua goes, and reloading into a gap would skip the theme
 # and stop watching it.
-PREVIOUS_THEME_HYPRLAND=false
-if [[ -f $CURRENT_THEME_PATH/hyprland.lua ]]; then
-  PREVIOUS_THEME_HYPRLAND=true
-fi
+HYPRLAND_WATCH_SEES_SWAP=false
 if [[ -d $CURRENT_THEME_PATH ]] && mv --exchange -T "$NEXT_THEME_PATH" "$CURRENT_THEME_PATH" 2>/dev/null; then
+  [[ -f $NEXT_THEME_PATH/hyprland.lua ]] && HYPRLAND_WATCH_SEES_SWAP=true
   rm -rf "$NEXT_THEME_PATH"
 else
   rm -rf "$CURRENT_THEME_PATH"
