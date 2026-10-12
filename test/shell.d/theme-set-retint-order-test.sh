@@ -221,6 +221,16 @@ touch "$test_tmp/release"
 wait_for_detached_work
 pass "a swap away from a symlinked current theme still reloads Hyprland"
 
+# A theme whose hyprland.lua links elsewhere loses only the link in the swap.
+rm -f "$test_tmp/release"
+printf -- '-- borders\n' >"$test_tmp/linked-hyprland.lua"
+ln -sf "$test_tmp/linked-hyprland.lua" "$state/theme/hyprland.lua"
+TEST_AUTORELOAD_OFF=false OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme beta
+grep -qx 'omarchy-restart-hyprctl' "$log" || fail "a swap away from a linked hyprland.lua reloads Hyprland"
+touch "$test_tmp/release"
+wait_for_detached_work
+pass "a swap away from a theme with a linked hyprland.lua still reloads Hyprland"
+
 rm -f "$test_tmp/release"
 (sleep 0.3; touch "$test_tmp/release") &
 OMARCHY_THEME_WAIT=1 OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme beta
