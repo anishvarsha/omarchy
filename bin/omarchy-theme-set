@@ -86,7 +86,7 @@ watch_hyprland_reloads() {
   [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} && -S $socket ]] || return 0
   HYPRLAND_RELOADS=$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/omarchy-theme-set-reloads.XXXXXX") || return 0
   {
-    timeout 3 socat -u "UNIX-CONNECT:$socket" - |
+    timeout 10 socat -u "UNIX-CONNECT:$socket" - |
       while IFS= read -r event; do
         # The record may be gone once the switch is done with it.
         if [[ $event == configreloaded* && -f $HYPRLAND_RELOADS ]]; then
@@ -579,14 +579,23 @@ else
   set_theme_background
 fi
 
+# Settle the Hyprland reload while still holding the selection lock: a reload
+# this switch started must not reach the next switch's listener after that
+# one's swap, where it would pass for proof the newer theme loaded. An intro
+# settles it after playback, under the same lock.
+if [[ $THEME_HEADLESS != "1" && -z $THEME_INTRO_TOKEN ]]; then
+  reload_hyprland_unless_watched
+  forget_hyprland_reloads
+fi
+
 # The shared staging/current symlinks are updated and the shell has accepted
 # the transition. Let another theme selection queue only behind that critical
 # section, not behind slower app-retint hooks and selector cache warmups.
 flock -u 9
 
 # What the user is looking at: the terminals and the programs drawn inside
-# them, plus the window borders when no intro is playing. These run as soon as
-# the theme is in place, alongside the wallpaper and bar transition.
+# them. These run as soon as the theme is in place, alongside the wallpaper
+# and bar transition.
 visible_theme_commands=(
   omarchy-restart-terminal
   omarchy-theme-set-foot
@@ -658,15 +667,7 @@ apply_other_theme_commands() {
 }
 
 if [[ $THEME_HEADLESS != "1" ]]; then
-  # An intro reloads Hyprland after playback; ordinary theme changes reload it
-  # with the terminals.
-  if [[ -z $THEME_INTRO_TOKEN ]]; then
-    visible_theme_commands+=(reload_hyprland_unless_watched)
-  fi
   run_parallel "${visible_theme_commands[@]}"
-  if [[ -z $THEME_INTRO_TOKEN ]]; then
-    forget_hyprland_reloads
-  fi
 
   # A switch from the theme picker, the menu or a script returns once what is
   # on screen has changed and leaves the rest running behind it, with its

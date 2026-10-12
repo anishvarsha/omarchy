@@ -45,6 +45,12 @@ if [[ $name == omarchy-theme-set-browser ]]; then
     echo "browser-stdin $line" >>"$TEST_LOG"
   fi
 fi
+# An explicit Hyprland reload takes TEST_RELOAD_SECONDS and then shows up on
+# the event socket.
+if [[ $name == omarchy-restart-hyprctl ]]; then
+  sleep "${TEST_RELOAD_SECONDS:-0}"
+  echo reload >>"$TEST_TMP/explicit-reloads"
+fi
 echo "$name" >>"$TEST_LOG"
 # With TEST_SLOW_HOOK_THEME, that theme's hook writes to stderr only once the
 # test says a later batch is done.
@@ -128,17 +134,22 @@ chmod +x "$commands/omarchy-notification-send" "$commands/hyprctl" "$commands/om
 
 # Hyprland's event socket. While $TEST_TMP/hyprland-autoreloads exists, it
 # reports a config reload once the swap has replaced the current theme, which
-# the test marks with an outgoing-theme file beforehand.
+# the test marks with an outgoing-theme file beforehand. It also reports each
+# explicit reload made after the listener connected.
 export TEST_TMP="$test_tmp" TEST_STATE="$state"
 mkdir -p "$test_tmp/hypr/test-hypr"
+: >"$test_tmp/explicit-reloads"
 cat >"$test_tmp/hypr-events" <<'STUB'
 #!/bin/bash
-[[ -f $TEST_TMP/hyprland-autoreloads ]] || exec sleep 3
+explicit=$(wc -l <"$TEST_TMP/explicit-reloads")
 for attempt in {1..300}; do
-  [[ -e $TEST_STATE/theme/outgoing-theme || ! -e $TEST_STATE/theme/hyprland.lua ]] || break
+  if [[ -f $TEST_TMP/hyprland-autoreloads && ! -e $TEST_STATE/theme/outgoing-theme && -e $TEST_STATE/theme/hyprland.lua ]] ||
+    (( $(wc -l <"$TEST_TMP/explicit-reloads") > explicit )); then
+    echo "configreloaded>>"
+    break
+  fi
   sleep 0.01
 done
-echo "configreloaded>>"
 sleep 3
 STUB
 chmod +x "$test_tmp/hypr-events"
@@ -248,6 +259,20 @@ if mv --exchange -T "$test_tmp/exchange-a" "$test_tmp/exchange-b" 2>/dev/null; t
   grep -q '^omarchy-theme-set-gnome$' "$log" || fail "the intro switch finishes its retints"
   ! grep -qx 'omarchy-restart-hyprctl' "$log" || fail "an intro does not repeat the reload Hyprland made at the swap"
   pass "an intro does not repeat the reload Hyprland made at the swap"
+
+  # Alpha's slow explicit reload must not reach beta's listener after beta's
+  # swap, where it would pass for a reload of beta.
+  : >"$log"
+  touch "$test_tmp/release"
+  TEST_RELOAD_SECONDS=0.3 OMARCHY_THEME_SKIP_BACKGROUND=1 switch_theme alpha &
+  alpha_switch=$!
+  sleep 0.1
+  TEST_AUTORELOAD_OFF=false OMARCHY_THEME_SKIP_BACKGROUND=1 switch_theme beta
+  wait "$alpha_switch"
+  wait_for_detached_work
+  (( $(grep -cx 'omarchy-restart-hyprctl' "$log") == 2 )) ||
+    fail "a reload from the previous switch does not count for the next one" "$(cat "$log")"
+  pass "a reload from the previous switch does not count for the next one"
 else
   skip "an intro does not repeat the reload Hyprland made at the swap: mv --exchange is unavailable"
 fi
