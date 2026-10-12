@@ -184,12 +184,18 @@ touch "$test_tmp/release"
 wait_for_detached_work
 pass "a switch without an intro reloads Hyprland with the terminals"
 
-rm -f "$test_tmp/release"
-TEST_AUTORELOAD_OFF=false OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme beta
-! grep -qx 'omarchy-restart-hyprctl' "$log" || fail "Hyprland watching its config is left to reload itself"
-touch "$test_tmp/release"
-wait_for_detached_work
-pass "Hyprland reloads only once when it watches its config"
+# Leaving the reload to the watch needs a gapless swap, so mv --exchange.
+mkdir "$test_tmp/exchange-a" "$test_tmp/exchange-b"
+if mv --exchange -T "$test_tmp/exchange-a" "$test_tmp/exchange-b" 2>/dev/null; then
+  rm -f "$test_tmp/release"
+  TEST_AUTORELOAD_OFF=false OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme beta
+  ! grep -qx 'omarchy-restart-hyprctl' "$log" || fail "Hyprland watching its config is left to reload itself"
+  touch "$test_tmp/release"
+  wait_for_detached_work
+  pass "Hyprland reloads only once when it watches its config"
+else
+  skip "Hyprland reloads only once when it watches its config: mv --exchange is unavailable"
+fi
 
 # An outgoing theme without a hyprland.lua left Hyprland nothing to watch.
 rm -f "$test_tmp/release" "$state/theme/hyprland.lua"
