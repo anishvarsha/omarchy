@@ -5,7 +5,7 @@ set -euo pipefail
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 
 test_tmp=$(mktemp -d)
-trap 'touch "$test_tmp/release" "$test_tmp/intro-done"; rm -rf "$test_tmp"' EXIT
+trap 'touch "$test_tmp/release" "$test_tmp/intro-done"; kill "${hypr_events_pid:-}" 2>/dev/null; rm -rf "$test_tmp"' EXIT
 home="$test_tmp/home"
 state="$home/.local/state/omarchy/current"
 themes="$home/.config/omarchy/themes"
@@ -122,13 +122,36 @@ exec "$real_mv" "\$@"
 STUB
 chmod +x "$commands/omarchy-notification-send" "$commands/hyprctl" "$commands/omarchy-shell" "$commands/owe" "$commands/mv"
 
+# Hyprland's event socket. While $TEST_TMP/hyprland-autoreloads exists, it
+# reports a config reload once the swap has replaced the current theme, which
+# the test marks with an outgoing-theme file beforehand.
+export TEST_TMP="$test_tmp" TEST_STATE="$state"
+mkdir -p "$test_tmp/hypr/test-hypr"
+cat >"$test_tmp/hypr-events" <<'STUB'
+#!/bin/bash
+[[ -f $TEST_TMP/hyprland-autoreloads ]] || exec sleep 3
+for attempt in {1..300}; do
+  [[ -e $TEST_STATE/theme/outgoing-theme || ! -e $TEST_STATE/theme/hyprland.lua ]] || break
+  sleep 0.01
+done
+echo "configreloaded>>"
+sleep 3
+STUB
+chmod +x "$test_tmp/hypr-events"
+socat "UNIX-LISTEN:$test_tmp/hypr/test-hypr/.socket2.sock,fork" "EXEC:$test_tmp/hypr-events" 2>/dev/null &
+hypr_events_pid=$!
+for attempt in {1..100}; do
+  [[ ! -S $test_tmp/hypr/test-hypr/.socket2.sock ]] || break
+  sleep 0.02
+done
+
 set_theme() {
   : >"$log"
   switch_theme "$@"
 }
 
 switch_theme() {
-  HOME="$home" OMARCHY_PATH="$ROOT" PATH="$commands:$ROOT/bin:$PATH" XDG_RUNTIME_DIR="$test_tmp" \
+  HOME="$home" OMARCHY_PATH="$ROOT" PATH="$commands:$ROOT/bin:$PATH" XDG_RUNTIME_DIR="$test_tmp" HYPRLAND_INSTANCE_SIGNATURE=test-hypr \
     TEST_LOG="$log" TEST_TMP="$test_tmp" TEST_STATE="$state" TEST_ROOT="$ROOT" \
     /bin/bash "$ROOT/bin/omarchy-theme-set" "$1" </dev/null >"$test_tmp/stdout" 2>"$test_tmp/stderr" ||
     fail "theme selection completes" "$(cat "$test_tmp/stderr")"
@@ -184,72 +207,46 @@ touch "$test_tmp/release"
 wait_for_detached_work
 pass "a switch without an intro reloads Hyprland with the terminals"
 
-# Leaving the reload to the watch needs a gapless swap, so mv --exchange.
+# Hyprland reloading by itself after the swap leaves it at that one reload.
 mkdir "$test_tmp/exchange-a" "$test_tmp/exchange-b"
 if mv --exchange -T "$test_tmp/exchange-a" "$test_tmp/exchange-b" 2>/dev/null; then
   rm -f "$test_tmp/release"
+  touch "$test_tmp/hyprland-autoreloads" "$state/theme/outgoing-theme"
   TEST_AUTORELOAD_OFF=false OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme beta
-  ! grep -qx 'omarchy-restart-hyprctl' "$log" || fail "Hyprland watching its config is left to reload itself"
+  rm -f "$test_tmp/hyprland-autoreloads"
+  ! grep -qx 'omarchy-restart-hyprctl' "$log" || fail "a reload Hyprland made by itself after the swap is not repeated"
   touch "$test_tmp/release"
   wait_for_detached_work
-  pass "Hyprland reloads only once when it watches its config"
+  pass "Hyprland reloads only once when its config watch caught the swap"
 else
-  skip "Hyprland reloads only once when it watches its config: mv --exchange is unavailable"
+  skip "Hyprland reloads only once when its config watch caught the swap: mv --exchange is unavailable"
 fi
 
-# An outgoing theme without a hyprland.lua left Hyprland nothing to watch.
-rm -f "$test_tmp/release" "$state/theme/hyprland.lua"
+# The watch is on, but no reload follows the swap: the explicit one still runs.
+rm -f "$test_tmp/release"
 TEST_AUTORELOAD_OFF=false OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme beta
-grep -qx 'omarchy-restart-hyprctl' "$log" || fail "a switch from a theme without hyprland.lua reloads Hyprland"
+grep -qx 'omarchy-restart-hyprctl' "$log" || fail "a swap no reload followed reloads Hyprland"
 touch "$test_tmp/release"
 wait_for_detached_work
-pass "a switch from a theme Hyprland had no file of to watch still reloads it"
+pass "a swap the config watch missed still reloads Hyprland"
 
-# Without an exchanging rename the swap leaves a gap the watch can fall into.
+# Without an exchanging rename the swap leaves a gap, and a reload that lands
+# in it may have loaded no theme, so it does not count.
 rm -f "$test_tmp/release"
+touch "$test_tmp/hyprland-autoreloads" "$state/theme/outgoing-theme"
 TEST_NO_EXCHANGE=1 TEST_AUTORELOAD_OFF=false OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme beta
+rm -f "$test_tmp/hyprland-autoreloads"
 grep -qx 'omarchy-restart-hyprctl' "$log" || fail "a swap that could not be one rename reloads Hyprland"
 [[ $(<"$state/theme.name") == "beta" && -f $state/theme/hyprland.lua ]] || fail "the fallback swap still applies the theme"
 touch "$test_tmp/release"
 wait_for_detached_work
 pass "a swap that could not be one rename still reloads Hyprland"
 
-# A current theme that is a symlink loses only the link in the swap, so the
-# file Hyprland watches is never touched.
-rm -f "$test_tmp/release"
-rm -rf "$test_tmp/linked-theme"
-mv "$state/theme" "$test_tmp/linked-theme"
-ln -s "$test_tmp/linked-theme" "$state/theme"
-TEST_AUTORELOAD_OFF=false OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme beta
-grep -qx 'omarchy-restart-hyprctl' "$log" || fail "a swap away from a symlinked theme reloads Hyprland"
-[[ -d $state/theme && ! -L $state/theme ]] || fail "the swap leaves a real current theme directory"
-touch "$test_tmp/release"
-wait_for_detached_work
-pass "a swap away from a symlinked current theme still reloads Hyprland"
-
-# A theme whose hyprland.lua links elsewhere loses only the link in the swap.
-rm -f "$test_tmp/release"
-printf -- '-- borders\n' >"$test_tmp/linked-hyprland.lua"
-ln -sf "$test_tmp/linked-hyprland.lua" "$state/theme/hyprland.lua"
-TEST_AUTORELOAD_OFF=false OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme beta
-grep -qx 'omarchy-restart-hyprctl' "$log" || fail "a swap away from a linked hyprland.lua reloads Hyprland"
-touch "$test_tmp/release"
-wait_for_detached_work
-pass "a swap away from a theme with a linked hyprland.lua still reloads Hyprland"
-
-# A hard link elsewhere keeps the outgoing hyprland.lua alive through the swap.
-rm -f "$test_tmp/release" "$test_tmp/hard-linked-hyprland.lua"
-ln "$state/theme/hyprland.lua" "$test_tmp/hard-linked-hyprland.lua"
-TEST_AUTORELOAD_OFF=false OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme beta
-grep -qx 'omarchy-restart-hyprctl' "$log" || fail "a swap away from a hard-linked hyprland.lua reloads Hyprland"
-touch "$test_tmp/release"
-wait_for_detached_work
-pass "a swap away from a hard-linked hyprland.lua still reloads Hyprland"
-
 rm -f "$test_tmp/release"
 (sleep 0.3; touch "$test_tmp/release") &
+releaser=$!
 OMARCHY_THEME_WAIT=1 OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme beta
-wait
+wait "$releaser"
 for command in omarchy-theme-set-browser omarchy-hook; do
   grep -qx "$command" "$log" || fail "OMARCHY_THEME_WAIT=1 returns only after $command" "$(cat "$log")"
 done
@@ -263,8 +260,9 @@ rm -f "$test_tmp/release" "$test_tmp/held"
 TEST_HOLD_THEME=alpha OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme alpha
 wait_held
 (sleep 0.3; touch "$test_tmp/release") &
+releaser=$!
 TEST_HOLD_THEME=alpha OMARCHY_THEME_WAIT=1 OMARCHY_THEME_SKIP_BACKGROUND=1 switch_theme beta
-wait
+wait "$releaser"
 wait_for_detached_work
 [[ $(grep '^browser-for ' "$log" | tr '\n' ' ') == "browser-for alpha browser-for beta " ]] ||
   fail "an older switch's retints finish before a newer one's start" "$(cat "$log")"
