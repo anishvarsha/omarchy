@@ -508,7 +508,11 @@ fi
 # and stop watching it.
 HYPRLAND_WATCH_SEES_SWAP=false
 if [[ -d $CURRENT_THEME_PATH ]] && mv --exchange -T "$NEXT_THEME_PATH" "$CURRENT_THEME_PATH" 2>/dev/null; then
-  [[ -f $NEXT_THEME_PATH/hyprland.lua ]] && HYPRLAND_WATCH_SEES_SWAP=true
+  # The watch sees the old hyprland.lua deleted. A current theme that was a
+  # symlink only loses the link, which leaves the file it watches alone.
+  if [[ ! -L $NEXT_THEME_PATH && -f $NEXT_THEME_PATH/hyprland.lua ]]; then
+    HYPRLAND_WATCH_SEES_SWAP=true
+  fi
   rm -rf "$NEXT_THEME_PATH"
 else
   rm -rf "$CURRENT_THEME_PATH"

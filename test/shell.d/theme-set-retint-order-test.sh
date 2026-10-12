@@ -208,6 +208,19 @@ touch "$test_tmp/release"
 wait_for_detached_work
 pass "a swap that could not be one rename still reloads Hyprland"
 
+# A current theme that is a symlink loses only the link in the swap, so the
+# file Hyprland watches is never touched.
+rm -f "$test_tmp/release"
+rm -rf "$test_tmp/linked-theme"
+mv "$state/theme" "$test_tmp/linked-theme"
+ln -s "$test_tmp/linked-theme" "$state/theme"
+TEST_AUTORELOAD_OFF=false OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme beta
+grep -qx 'omarchy-restart-hyprctl' "$log" || fail "a swap away from a symlinked theme reloads Hyprland"
+[[ -d $state/theme && ! -L $state/theme ]] || fail "the swap leaves a real current theme directory"
+touch "$test_tmp/release"
+wait_for_detached_work
+pass "a swap away from a symlinked current theme still reloads Hyprland"
+
 rm -f "$test_tmp/release"
 (sleep 0.3; touch "$test_tmp/release") &
 OMARCHY_THEME_WAIT=1 OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme beta
