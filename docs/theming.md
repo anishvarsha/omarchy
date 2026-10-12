@@ -24,7 +24,9 @@ A theme installed from a git repo is held to a much shorter list; see [What an i
 3. If needed, generate `colors.toml` from `alacritty.toml`.
 4. Run `omarchy-theme-set-templates` to render templates into the staging
    theme.
-5. Move the staging theme into `~/.local/state/omarchy/current/theme`, write
+5. Exchange the staging theme with `~/.local/state/omarchy/current/theme` in
+   one rename (`mv --exchange`), so a current theme exists throughout and
+   Hyprland's config watch reloads into the new one, remove the old one, write
    `~/.local/state/omarchy/current/theme.name`, and notify the running shell.
 
 Template rendering only happens when the staged theme has `colors.toml`.

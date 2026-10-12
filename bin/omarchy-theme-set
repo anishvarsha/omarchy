@@ -499,9 +499,16 @@ if [[ -n $THEME_BACKGROUND_INTRO ]]; then
   wait_for_theme_intro themeIntroCoverStatus "$(stat -Lc '%d:%i' "$NEXT_THEME_PATH")" "loading"
 fi
 
-# Swap next theme in as current
-rm -rf "$CURRENT_THEME_PATH"
-mv "$NEXT_THEME_PATH" "$CURRENT_THEME_PATH"
+# Swap next theme in as current. Exchanging the two directories in one rename
+# leaves no moment without a current theme: Hyprland's config watch reloads
+# when the old hyprland.lua goes, and reloading into a gap would skip the theme
+# and stop watching it.
+if [[ -d $CURRENT_THEME_PATH ]] && mv --exchange -T "$NEXT_THEME_PATH" "$CURRENT_THEME_PATH" 2>/dev/null; then
+  rm -rf "$NEXT_THEME_PATH"
+else
+  rm -rf "$CURRENT_THEME_PATH"
+  mv "$NEXT_THEME_PATH" "$CURRENT_THEME_PATH"
+fi
 APPLIED_THEME_ID=$(stat -Lc '%d:%i' "$CURRENT_THEME_PATH")
 
 # Store theme name for reference
