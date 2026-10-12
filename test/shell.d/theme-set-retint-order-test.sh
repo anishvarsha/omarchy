@@ -16,6 +16,7 @@ for theme in alpha beta; do
   mkdir -p "$themes/$theme/backgrounds/intros"
   cp "$ROOT/themes/tokyo-night/colors.toml" "$themes/$theme/colors.toml"
   printf 'still\n' >"$themes/$theme/backgrounds/1-sky.webp"
+  printf -- '-- borders\n' >"$themes/$theme/hyprland.lua"
   printf 'intro\n' >"$themes/$theme/backgrounds/intros/1-sky.mp4"
 done
 cp -r "$themes/alpha" "$state/theme"
@@ -180,6 +181,14 @@ TEST_AUTORELOAD_OFF=false OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme beta
 touch "$test_tmp/release"
 wait_for_detached_work
 pass "Hyprland reloads only once when it watches its config"
+
+# An outgoing theme without a hyprland.lua left Hyprland nothing to watch.
+rm -f "$test_tmp/release" "$state/theme/hyprland.lua"
+TEST_AUTORELOAD_OFF=false OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme beta
+grep -qx 'omarchy-restart-hyprctl' "$log" || fail "a switch from a theme without hyprland.lua reloads Hyprland"
+touch "$test_tmp/release"
+wait_for_detached_work
+pass "a switch from a theme Hyprland had no file of to watch still reloads it"
 
 rm -f "$test_tmp/release"
 (sleep 0.3; touch "$test_tmp/release") &
