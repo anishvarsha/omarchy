@@ -2,12 +2,10 @@
 
 # omarchy:summary=Toggle the split direction of the focused Hyprland window
 
-# togglesplit is a dwindle-only layout message. The scrolling layout rejects it
-# with a Lua runtime error, so only send it on a dwindle workspace.
 set -euo pipefail
 
-layout=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.tiledLayout // empty')
-[[ $layout == "dwindle" ]] || exit 0
-
-hyprctl dispatch 'hl.dsp.layout("togglesplit")' >/dev/null 2>&1 ||
-  hyprctl dispatch layoutmsg togglesplit >/dev/null
+# togglesplit is a dwindle-only layout message; the scrolling layout rejects it
+# with a Lua runtime error. Read the layout and dispatch in the same Lua call so
+# a workspace switch in between cannot let the message reach a non-dwindle
+# workspace.
+hyprctl eval 'local workspace = hl.get_active_workspace(); if workspace and workspace.tiled_layout == "dwindle" then hl.dispatch(hl.dsp.layout("togglesplit")) end' >/dev/null
